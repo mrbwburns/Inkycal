@@ -7,6 +7,7 @@ import locale
 import logging
 import math
 import os
+import time
 from datetime import datetime
 
 import matplotlib.dates as mdates
@@ -25,6 +26,7 @@ from inkycal.custom.functions import get_system_tz
 from inkycal.custom.functions import internet_available
 from inkycal.custom.functions import top_level
 from inkycal.custom.inkycal_exceptions import NetworkNotReachableError
+from inkycal.custom.mqtt_client import mqtt_client
 from inkycal.custom.openweathermap_wrapper import OpenWeatherMap
 from inkycal.modules.inky_image import image_to_palette
 from inkycal.modules.template import inkycal_module
@@ -63,6 +65,21 @@ def get_image_from_plot(fig: plt) -> Image:
     fig.savefig(buf)
     buf.seek(0)
     return Image.open(buf)
+
+
+def get_float_from_mqtt_key(mqtt_obj: mqtt_client, key: str):
+    MAX_RETRIES = 5
+    value = None
+    retries = 0
+    while value == None:
+        retries += 1
+        if retries > MAX_RETRIES:
+            logger.error(f"Couldn't get {key} from mqtt server after {MAX_RETRIES} retries.")
+            break
+        value = mqtt_obj.get_key(key=key)
+        time.sleep(1)
+    value = float(value) if value is not None else None
+    return value
 
 
 class Fullweather(inkycal_module):
@@ -126,6 +143,17 @@ class Fullweather(inkycal_module):
             "label": "Should the weather icons have outlines?",
             "options": [True, False],
         },
+        "mqtt_sub": {
+            "label": "Should the weather display also show room climate readings from MQTT?",
+            "options": [True, False],
+        },
+        "mqtt_host": {"label": "The MQTT server IP"},
+        "mqtt_port": {"label": "The MQTT server port"},
+        "mqtt_user": {"label": "The MQTT server username"},
+        "mqtt_password": {"label": "The MQTT server password"},
+        "mqtt_topic": {"label": "The MQTT topic we want to get the values from"},
+        "mqtt_temp_key": {"label": "MQTT key for the room temperature"},
+        "mqtt_rH_key": {"label": "MQTT key for the relative humidity of the room"},
     }
 
     def __init__(self, config):
@@ -224,6 +252,18 @@ class Fullweather(inkycal_module):
         else:
             self.font = "Roboto"
 
+        if "mqtt_sub" in config:
+            self.mqtt_sub = bool(config["mqtt_sub"])
+            self.mqtt_host = config["mqtt_host"]
+            self.mqtt_port = int(config["mqtt_port"])
+            self.mqtt_user = config["mqtt_user"]
+            self.mqtt_password = config["mqtt_password"]
+            self.mqtt_topic = config["mqtt_topic"]
+            self.mqtt_temp_key = config["mqtt_temp_key"]
+            self.mqtt_rH_key = config["mqtt_rH_key"]
+        else:
+            self.mqtt_sub = False
+
         # some calculations for scalability
         # TODO: make this work for all sizes
         if self.orientation == "horizontal":
@@ -268,7 +308,7 @@ class Fullweather(inkycal_module):
         ## Create drawing object for image
         image_draw = ImageDraw.Draw(self.image)
 
-        if False:  # self.mqtt_sub == True:
+        if self.mqtt_sub == True:
             # Add icon for Home
             homeTempIcon = Image.open(os.path.join(icons_dir, "home_temp.png"))
             homeTempIcon = ImageOps.invert(homeTempIcon)
@@ -277,13 +317,18 @@ class Fullweather(inkycal_module):
             self.image.paste(homeTempIcon, (15, homeTemp_y))
 
             # Home temperature
-            # my_home = mqtt_temperature(host=mqtt_host, port=mqtt_port, user=mqtt_user, password=mqtt_pass, topic=mqtt_topic)
-            # homeTemp = None
-            # while homeTemp == None:
-            #    homeTemp = my_home.get_temperature()
-            # homeTempString = f"{homeTemp:.1f} {tempDispUnit}"
-            # homeTempFont = font.font(font_family, "Bold", 28)
-            # image_draw.text((65, homeTemp_y), homeTempString, font=homeTempFont, fill=(255, 255, 255))
+            my_home = mqtt_client(
+                host=self.mqtt_host,
+                port=self.mqtt_port,
+                user=self.mqtt_user,
+                password=self.mqtt_password,
+                topic=self.mqtt_topic,
+            )
+            homeTemp = get_float_from_mqtt_key(mqtt_obj=my_home, key=self.mqtt_temp_key)
+            homeTempString = f"{homeTemp:.1f} {self.tempDispUnit}" if homeTemp is not None else " "
+            homeTempFont = self.get_font("Bold", self.font_size + 8)
+
+            image_draw.text((65, homeTemp_y), homeTempString, font=homeTempFont, fill=(255, 255, 255))
 
             # Add icon for rH
             humidityIcon = Image.open(os.path.join(icons_dir, "humidity.bmp"))
@@ -292,12 +337,10 @@ class Fullweather(inkycal_module):
             self.image.paste(humidityIcon, (15, humidity_y))
 
             # rel. humidity
-            # rH = None
-            # while rH == None:
-            #    rH = my_home.get_rH()
-            # humidityString = f"{rH:.0f} %"
-            # humidityFont = font.font(font_family, "Bold", 28)
-            # image_draw.text((65, humidity_y), humidityString, font=humidityFont, fill=(255, 255, 255))
+            rH = get_float_from_mqtt_key(mqtt_obj=my_home, key=self.mqtt_rH_key)
+            humidityString = f"{rH:.0f} %" if rH is not None else " "
+            humidityFont = self.get_font("Bold", self.font_size + 8)
+            image_draw.text((65, humidity_y), humidityString, font=humidityFont, fill=(255, 255, 255))
         else:
             # Add icon for Humidity
             humidityIcon = Image.open(os.path.join(icons_dir, "humidity.bmp"))
