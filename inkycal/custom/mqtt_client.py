@@ -4,7 +4,7 @@ import paho.mqtt.client as mqtt
 
 
 class mqtt_client:
-    def __init__(self, host:str, port:int, user:str, password:str, topic:str):
+    def __init__(self, host: str, port: int, user: str, password: str, topic: str):
         """
         Implementation of a MQTT message broker client connection,
         including subscribing a certain topic and the necessary callbacks.

@@ -67,7 +67,7 @@ def get_image_from_plot(fig: plt) -> Image:
     return Image.open(buf)
 
 
-def get_and_retry_mqtt_key(mqtt_obj: mqtt_client, key: str):
+def get_float_from_mqtt_key(mqtt_obj: mqtt_client, key: str):
     MAX_RETRIES = 5
     value = None
     retries = 0
@@ -76,8 +76,9 @@ def get_and_retry_mqtt_key(mqtt_obj: mqtt_client, key: str):
         if retries > MAX_RETRIES:
             logger.error(f"Couldn't get {key} from mqtt server after {MAX_RETRIES} retries.")
             break
-        value = mqtt_obj.get_key(key=str)
+        value = mqtt_obj.get_key(key=key)
         time.sleep(1)
+    value = float(value) if value is not None else None
     return value
 
 
@@ -323,7 +324,7 @@ class Fullweather(inkycal_module):
                 password=self.mqtt_password,
                 topic=self.mqtt_topic,
             )
-            homeTemp = get_and_retry_mqtt_key(mqtt_obj=my_home, key=self.mqtt_temp_key)
+            homeTemp = get_float_from_mqtt_key(mqtt_obj=my_home, key=self.mqtt_temp_key)
             homeTempString = f"{homeTemp:.1f} {self.tempDispUnit}" if homeTemp is not None else " "
             homeTempFont = self.get_font("Bold", self.font_size + 8)
 
@@ -336,7 +337,7 @@ class Fullweather(inkycal_module):
             self.image.paste(humidityIcon, (15, humidity_y))
 
             # rel. humidity
-            rH = get_and_retry_mqtt_key(mqtt_obj=my_home, key=self.mqtt_rH_key)
+            rH = get_float_from_mqtt_key(mqtt_obj=my_home, key=self.mqtt_rH_key)
             humidityString = f"{rH:.0f} %" if rH is not None else " "
             humidityFont = self.get_font("Bold", self.font_size + 8)
             image_draw.text((65, humidity_y), humidityString, font=humidityFont, fill=(255, 255, 255))
